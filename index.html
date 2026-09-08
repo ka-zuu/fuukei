@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>風景 — Fuukei</title>
+<meta name="description" content="世界の美しい風景を全画面で流し続ける、バックエンド不要のスクリーンセーバー的ビューア。">
+<meta name="theme-color" content="#05070c">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://commons.wikimedia.org">
+<link rel="preconnect" href="https://upload.wikimedia.org">
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+<div id="stage" aria-live="polite">
+  <img class="layer" alt="" decoding="async">
+  <img class="layer" alt="" decoding="async">
+  <div id="vignette"></div>
+</div>
+
+<div id="clock" hidden><span id="clock-time"></span><span id="clock-date"></span></div>
+
+<div id="status" role="status" aria-live="polite"></div>
+
+<footer id="credit" hidden>
+  <div class="credit-title" id="credit-title"></div>
+  <div class="credit-meta">
+    <span id="credit-author"></span>
+    <a id="credit-license" target="_blank" rel="noopener noreferrer"></a>
+    <a id="credit-source" target="_blank" rel="noopener noreferrer">出典</a>
+  </div>
+</footer>
+
+<header id="topbar">
+  <button id="btn-panel" class="icon-btn" title="設定パネル (S)" aria-label="設定パネル">☰</button>
+  <div class="spacer"></div>
+  <div class="transport">
+    <button id="btn-prev" class="icon-btn" title="前へ (←)" aria-label="前の画像">‹</button>
+    <button id="btn-play" class="icon-btn" title="再生 / 一時停止 (Space)" aria-label="再生・一時停止">⏸</button>
+    <button id="btn-next" class="icon-btn" title="次へ (→)" aria-label="次の画像">›</button>
+  </div>
+  <div class="spacer"></div>
+  <button id="btn-info" class="icon-btn" title="クレジット表示 (I)" aria-label="クレジット表示">ⓘ</button>
+  <button id="btn-full" class="icon-btn" title="全画面 (F)" aria-label="全画面">⛶</button>
+</header>
+
+<aside id="panel" aria-label="表示設定" hidden>
+  <div class="panel-head">
+    <h1>風景 <small>Fuukei</small></h1>
+    <button id="btn-close-panel" class="icon-btn" aria-label="閉じる">✕</button>
+  </div>
+
+  <div class="panel-body">
+    <section>
+      <h2>カテゴリ</h2>
+      <div id="categories" class="chips"></div>
+    </section>
+
+    <section>
+      <h2>ラベル <small id="label-hint">（複数選択可）</small></h2>
+      <div id="labels" class="chips"></div>
+    </section>
+
+    <section>
+      <h2>雰囲気 <small>（任意）</small></h2>
+      <div id="modifiers" class="chips"></div>
+    </section>
+
+    <section>
+      <h2>ソース</h2>
+      <div class="chips" id="sources"></div>
+      <p class="note" id="source-note"></p>
+    </section>
+
+    <section id="ai-section" hidden>
+      <h2>AI 生成</h2>
+      <label class="field">
+        <span>プロバイダ</span>
+        <select id="ai-provider">
+          <option value="google-imagen">Google Imagen (Gemini API)</option>
+          <option value="google-gemini">Google Gemini 画像モデル</option>
+          <option value="openai">OpenAI Images</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>モデル</span>
+        <input id="ai-model" type="text" spellcheck="false" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>API キー</span>
+        <input id="ai-key" type="password" spellcheck="false" autocomplete="off" placeholder="貼り付けて保存">
+      </label>
+      <label class="field">
+        <span>画風</span>
+        <select id="ai-style"></select>
+      </label>
+      <label class="field">
+        <span>追加プロンプト</span>
+        <input id="ai-extra" type="text" placeholder="例: 朝もやの棚田、遠景に山">
+      </label>
+      <div class="row">
+        <button id="ai-save" class="btn">保存</button>
+        <button id="ai-clear" class="btn ghost">キーを削除</button>
+      </div>
+      <p class="note warn">APIキーはこの端末のブラウザ（localStorage）にのみ保存され、どこにも送信されません（生成リクエストは各プロバイダへ直接送られます）。共用端末では使用後に削除してください。生成には各社の従量課金が発生します。</p>
+    </section>
+
+    <section>
+      <h2>再生</h2>
+      <label class="field">
+        <span>切り替え間隔 <b id="interval-value">20秒</b></span>
+        <input id="interval" type="range" min="5" max="300" step="5" value="20">
+      </label>
+      <label class="switch"><input id="opt-kenburns" type="checkbox" checked><span>ゆっくり動かす（Ken Burns）</span></label>
+      <label class="switch"><input id="opt-clock" type="checkbox"><span>時計を表示</span></label>
+      <label class="switch"><input id="opt-credit" type="checkbox" checked><span>クレジットを表示</span></label>
+      <label class="switch"><input id="opt-wake" type="checkbox" checked><span>全画面中はスリープを抑制</span></label>
+      <label class="switch"><input id="opt-portrait" type="checkbox"><span>縦長の写真も含める</span></label>
+    </section>
+
+    <section>
+      <h2>画質</h2>
+      <label class="field">
+        <span>取得サイズ</span>
+        <select id="opt-quality">
+          <option value="auto">自動（画面サイズに合わせる）</option>
+          <option value="1600">1600px</option>
+          <option value="2560">2560px</option>
+          <option value="3840">3840px（4K）</option>
+        </select>
+      </label>
+      <label class="switch"><input id="opt-hqonly" type="checkbox" checked><span>高解像度のみ（長辺1920px以上）</span></label>
+    </section>
+
+    <section>
+      <h2>データ</h2>
+      <div class="row">
+        <button id="btn-clear-cache" class="btn ghost">キャッシュを削除</button>
+        <button id="btn-reset" class="btn ghost">設定を初期化</button>
+      </div>
+      <p class="note" id="cache-note"></p>
+      <p class="note">画像は Wikimedia Commons / Openverse のクリエイティブ・コモンズまたはパブリックドメイン作品です。作者名とライセンスは画面下部に表示されます。</p>
+    </section>
+
+    <section class="shortcuts">
+      <h2>ショートカット</h2>
+      <ul>
+        <li><kbd>Space</kbd> 再生/一時停止</li>
+        <li><kbd>←</kbd> <kbd>→</kbd> 前後の画像</li>
+        <li><kbd>F</kbd> 全画面 / <kbd>S</kbd> 設定 / <kbd>I</kbd> クレジット</li>
+        <li><kbd>Esc</kbd> 閉じる</li>
+      </ul>
+    </section>
+  </div>
+</aside>
+
+<div id="panel-scrim" hidden></div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
