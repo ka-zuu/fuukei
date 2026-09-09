@@ -4,8 +4,44 @@
 const ENDPOINT = 'https://commons.wikimedia.org/w/api.php';
 const PAGE_SIZE = 50; // 匿名アクセスの上限
 
-// 風景写真として不適切なファイル名を弾く（地図・図表・文書スキャンなど）
-const REJECT_TITLE = /\b(map|karte|mapa|diagram|chart|graph|logo|flag|coat[ _]of[ _]arms|seal|poster|scan|document|drawing|blueprint|plan|sketch|stamp|banknote|coin|portrait|selfie|panorama[ _]?xxl)\b/i;
+// 絵画・イラスト・図版など「写真ではない」ものを弾くためのキーワード。
+// 検索クエリの除外語（サーバー側で減らす）と、取得後のタイトル/説明文/カテゴリの
+// 再チェック（クライアント側で確実に弾く）の両方に使う。
+const ART_TERMS = [
+  'painting', 'illustration', 'drawing', 'sketch', 'engraving', 'etching',
+  'lithograph', 'woodcut', 'watercolor', 'watercolour', 'gouache', 'fresco',
+  'mosaic', 'tapestry', 'mural', 'clipart', 'clip art', 'cartoon', 'caricature',
+  'manuscript', 'miniature painting', 'ukiyo-e', 'woodblock print',
+  'stained glass', 'screenshot', 'rendering', 'render', 'cgi',
+  'digital art', 'vector image', 'ex libris', 'postcard'
+];
+// 風景写真として不適切なものを弾く（地図・図表・文書スキャン・絵画など）
+const REJECT_TEXT = new RegExp(
+  '\\b(' +
+    ['map', 'karte', 'mapa', 'diagram', 'chart', 'graph', 'logo', 'flag',
+      'coat[ _]of[ _]arms', 'heraldry', 'emblem', 'seal', 'poster', 'scan',
+      'document', 'blueprint', 'plan', 'stamp', 'banknote', 'coin', 'portrait',
+      'selfie', 'panorama[ _]?xxl', 'sculpture', 'carving', 'relief', 'ceramic',
+      ...ART_TERMS.map((t) => t.replace(/ /g, '[ _]'))
+    ].join('|') +
+  ')\\b',
+  'i'
+);
+// Commons のカテゴリ名から同じ観点で弾く（タイトルに現れない絵画作品などを捕まえる）
+const REJECT_CATEGORY = new RegExp(
+  '\\b(' +
+    ['paintings?', 'illustrations?', 'drawings?', 'sketches', 'engravings?',
+      'etchings?', 'lithographs?', 'woodcuts?', 'watercolou?rs?', 'gouache',
+      'frescos?', 'mosaics?', 'tapestr(?:y|ies)', 'murals?', 'clip ?art',
+      'cartoons?', 'caricatures?', 'manuscripts?', 'miniatures?', 'ukiyo-?e',
+      'woodblock prints?', 'stained[- ]glass', 'screenshots?', 'renders?',
+      'digital art', 'vector images?', 'ex[- ]?libris', 'postcards?',
+      'posters?', 'stamps?', 'sculptures?', 'carvings?', 'reliefs?', 'ceramics?',
+      'coats? of arms', 'heraldry', 'emblems?'
+    ].join('|') +
+  ')\\b',
+  'i'
+);
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export const id = 'commons';
@@ -37,7 +73,7 @@ export async function fetchPage({ terms, width, minWidth, allowPortrait, offset,
   if (!titles.length) return { items: [], total: 0, nextOffset: 0 };
 
   const items = await loadImageInfo(titles, width, signal);
-  const filtered = items.filter((it) => keep(it, minWidth, allowPortrait));
+  const filtered = items.filter((it) => keep(it, minWidth, allowPortrait)).map(strip);
 
   const nextOffset = total > PAGE_SIZE ? randomOffset(total) : 0;
   return { items: filtered, total, nextOffset };
@@ -46,6 +82,7 @@ export async function fetchPage({ terms, width, minWidth, allowPortrait, offset,
 function buildSearch(terms, minWidth) {
   const parts = [terms.join(' '), 'filetype:bitmap'];
   if (minWidth) parts.push(`filew:>${minWidth}`);
+  parts.push(...ART_TERMS.map((t) => (t.includes(' ') ? `-"${t}"` : `-${t}`)));
   return parts.join(' ');
 }
 
@@ -84,10 +121,12 @@ async function loadImageInfo(titles, width, signal) {
     formatversion: '2',
     origin: '*',
     titles: titles.join('|'),
-    prop: 'imageinfo',
+    prop: 'imageinfo|categories',
     iiprop: 'url|size|mime|extmetadata',
     iiurlwidth: String(width),
-    iiextmetadatafilter: 'Artist|Credit|LicenseShortName|LicenseUrl|UsageTerms|ObjectName|ImageDescription|Attribution|Restrictions'
+    iiextmetadatafilter: 'Artist|Credit|LicenseShortName|LicenseUrl|UsageTerms|ObjectName|ImageDescription|Attribution|Restrictions',
+    clshow: '!hidden',
+    cllimit: 'max'
   });
   const data = await getJson(`${ENDPOINT}?${params}`, signal);
   const pages = data?.query?.pages || [];
@@ -102,6 +141,7 @@ function toItem(page) {
   const title = (value('ObjectName') || page.title.replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '')).trim();
   // 原寸が要求幅より小さければ原寸をそのまま使う（無駄な拡大を避ける）
   const src = info.thumbwidth && info.thumbwidth < info.width ? info.thumburl : info.url;
+  const categories = (page.categories || []).map((c) => c.title.replace(/^Category:/, '').replace(/_/g, ' '));
 
   return {
     id: `commons:${page.pageid}`,
@@ -115,19 +155,28 @@ function toItem(page) {
     license: value('LicenseShortName') || value('UsageTerms') || 'Wikimedia Commons',
     licenseUrl: plainUrl(meta.LicenseUrl?.value),
     sourceUrl: info.descriptionurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
-    restrictions: value('Restrictions')
+    restrictions: value('Restrictions'),
+    // 判定専用。表示には使わない
+    _description: value('ImageDescription'),
+    _categories: categories
   };
 }
 
 function keep(item, minWidth, allowPortrait) {
   if (!ALLOWED_MIME.has(item.mime)) return false;
   if (item.restrictions) return false;
-  if (REJECT_TITLE.test(item.title)) return false;
+  if (REJECT_TEXT.test(item.title) || REJECT_TEXT.test(item._description)) return false;
+  if (item._categories.some((c) => REJECT_CATEGORY.test(c))) return false;
   if (minWidth && item.width < minWidth) return false;
   const ratio = item.width / item.height;
   if (!allowPortrait && ratio < 1.15) return false;
   if (ratio > 4.5) return false; // 超パノラマは全画面で破綻する
   return true;
+}
+
+/** 判定専用フィールドを外して、保存・表示用の item だけにする。 */
+function strip({ _description, _categories, ...item }) {
+  return item;
 }
 
 /** extmetadata の値は HTML 断片なのでプレーンテキスト化する。 */

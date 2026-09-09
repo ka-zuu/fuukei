@@ -2,6 +2,10 @@
 
 const ENDPOINT = 'https://api.openverse.org/v1/images/';
 
+// 絵画・イラスト系がまぎれた場合の保険（Openverse 側は category=photograph で
+// 大半を除外できるが、由来元の登録ミスに備えてタイトルも見ておく）
+const REJECT_TITLE = /\b(painting|illustration|drawing|sketch|engraving|etching|lithograph|woodcut|watercolou?r|clipart|cartoon|postcard|poster|stamp|mural|fresco|mosaic|manuscript|screenshot|render|digital art)\b/i;
+
 export const id = 'openverse';
 export const name = 'Openverse';
 export const note = '匿名利用のためレート制限が厳しめです。Commons で物足りないときの予備として。';
@@ -11,6 +15,7 @@ export async function fetchPage({ terms, minWidth, allowPortrait, offset, signal
   const params = new URLSearchParams({
     q: terms.join(' '),
     license_type: 'all-cc',
+    category: 'photograph',
     size: 'large',
     aspect_ratio: allowPortrait ? 'wide,square,tall' : 'wide',
     extension: 'jpg,png',
@@ -39,6 +44,7 @@ export async function fetchPage({ terms, minWidth, allowPortrait, offset, signal
       sourceUrl: r.foreign_landing_url || r.detail_url || ''
     }))
     .filter((it) => {
+      if (REJECT_TITLE.test(it.title)) return false;
       if (minWidth && it.width && it.width < minWidth) return false;
       if (!it.width || !it.height) return true;
       const ratio = it.width / it.height;
