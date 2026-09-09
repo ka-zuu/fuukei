@@ -115,7 +115,7 @@ function renderAiOptions() {
 
 function syncControls() {
   $('interval').value = settings.interval;
-  $('interval-value').textContent = `${settings.interval}秒`;
+  $('interval-value').textContent = formatInterval(settings.interval);
   $('opt-kenburns').checked = settings.kenburns;
   $('opt-clock').checked = settings.clock;
   $('opt-credit').checked = settings.credit;
@@ -238,7 +238,7 @@ function bindEvents() {
 
   $('interval').addEventListener('input', (e) => {
     settings.interval = Number(e.target.value);
-    $('interval-value').textContent = `${settings.interval}秒`;
+    $('interval-value').textContent = formatInterval(settings.interval);
   });
   $('interval').addEventListener('change', () => { store.save(settings); if (playing) scheduleNext(); });
 
@@ -444,6 +444,12 @@ function registerServiceWorker() {
       /* file:// で開いた場合など。オフライン対応が無効になるだけ */
     });
   });
+}
+
+/** 秒単位の間隔を「5分」「90分」のような表示用ラベルにする。 */
+function formatInterval(seconds) {
+  const minutes = Math.round(seconds / 60);
+  return `${minutes}分`;
 }
 
 function toggleIn(list, value) {

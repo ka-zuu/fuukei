@@ -7,7 +7,7 @@ export const DEFAULTS = {
   labels: [],
   modifiers: [],
   source: 'commons',      // commons | openverse | ai
-  interval: 20,           // 秒
+  interval: 300,          // 秒（既定 5 分。範囲は 1〜60 分）
   kenburns: true,
   clock: false,
   credit: true,
@@ -30,12 +30,18 @@ export const AI_DEFAULT_MODELS = {
   openai: 'gpt-image-1'
 };
 
+const INTERVAL_MIN = 60;
+const INTERVAL_MAX = 3600;
+
 export function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return structuredClone(DEFAULTS);
     const saved = JSON.parse(raw);
-    return { ...structuredClone(DEFAULTS), ...saved, ai: { ...DEFAULTS.ai, ...(saved.ai || {}) } };
+    const merged = { ...structuredClone(DEFAULTS), ...saved, ai: { ...DEFAULTS.ai, ...(saved.ai || {}) } };
+    // 旧バージョン（最短5秒）の保存値を新しい範囲(1〜60分)に収める
+    merged.interval = Math.min(INTERVAL_MAX, Math.max(INTERVAL_MIN, merged.interval || DEFAULTS.interval));
+    return merged;
   } catch {
     return structuredClone(DEFAULTS);
   }
