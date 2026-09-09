@@ -24,7 +24,7 @@
   <div id="vignette"></div>
 </div>
 
-<div id="clock" hidden><span id="clock-time"></span><span id="clock-date"></span></div>
+<div id="clock" hidden data-pos="center"><span id="clock-time"></span><span id="clock-date"></span></div>
 
 <div id="status" role="status" aria-live="polite"></div>
 
@@ -119,6 +119,16 @@
       </label>
       <label class="switch"><input id="opt-kenburns" type="checkbox" checked><span>ゆっくり動かす（Ken Burns）</span></label>
       <label class="switch"><input id="opt-clock" type="checkbox"><span>時計を表示</span></label>
+      <div class="field" id="clock-position-field">
+        <span>時計の位置</span>
+        <div class="pos-grid" id="clock-position">
+          <button type="button" class="pos-btn" data-pos="top-left" aria-label="左上"></button>
+          <button type="button" class="pos-btn" data-pos="top-right" aria-label="右上"></button>
+          <button type="button" class="pos-btn" data-pos="center" aria-label="中央"></button>
+          <button type="button" class="pos-btn" data-pos="bottom-left" aria-label="左下"></button>
+          <button type="button" class="pos-btn" data-pos="bottom-right" aria-label="右下"></button>
+        </div>
+      </div>
       <label class="switch"><input id="opt-credit" type="checkbox" checked><span>クレジットを表示</span></label>
       <label class="switch"><input id="opt-wake" type="checkbox" checked><span>全画面中はスリープを抑制</span></label>
       <label class="switch"><input id="opt-portrait" type="checkbox"><span>縦長の写真も含める</span></label>
