@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="風景">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a162c"/>
+      <stop offset="1" stop-color="#3a5c7a"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a344e"/>
+      <stop offset="1" stop-color="#070e18"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#ffd6a0" stop-opacity=".85"/>
+      <stop offset="1" stop-color="#ffd6a0" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="frame"><rect width="512" height="512" rx="96"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect width="512" height="512" fill="url(#sky)"/>
+    <circle cx="379" cy="113" r="120" fill="url(#glow)"/>
+    <circle cx="379" cy="113" r="43" fill="#ffe4b8"/>
+    <path d="M0 300 C 70 292 118 210 176 208 C 232 206 268 268 320 288 L 512 300 L 512 369 L 0 369 Z" fill="#243e5c"/>
+    <path d="M0 330 C 60 326 96 268 137 268 C 176 268 196 312 224 330 C 252 348 268 250 300 236 C 336 220 386 320 512 336 L 512 369 L 0 369 Z" fill="#0c1a2c"/>
+    <rect y="369" width="512" height="143" fill="url(#water)"/>
+    <g fill="#ffd6a0" opacity=".55">
+      <rect x="352" y="380" width="54" height="5" rx="2.5"/>
+      <rect x="345" y="398" width="68" height="5" rx="2.5" opacity=".8"/>
+      <rect x="356" y="418" width="46" height="4" rx="2" opacity=".6"/>
+      <rect x="349" y="440" width="60" height="4" rx="2" opacity=".4"/>
+      <rect x="360" y="464" width="38" height="4" rx="2" opacity=".25"/>
+    </g>
+  </g>
+</svg>
