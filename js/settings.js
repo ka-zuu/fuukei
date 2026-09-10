@@ -10,6 +10,7 @@ export const DEFAULTS = {
   interval: 300,          // 秒（既定 5 分。範囲は 1〜60 分）
   kenburns: true,
   clock: false,
+  clockPosition: 'center',   // center | top-left | top-right | bottom-left | bottom-right
   credit: true,
   wakeLock: true,
   allowPortrait: false,

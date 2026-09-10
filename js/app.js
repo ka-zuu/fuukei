@@ -133,6 +133,11 @@ function syncControls() {
   $('ai-extra').value = settings.ai.extra;
 
   $('clock').hidden = !settings.clock;
+  $('clock').dataset.pos = settings.clockPosition;
+  $('clock-position-field').hidden = !settings.clock;
+  $('clock-position').querySelectorAll('.pos-btn').forEach((btn) => {
+    btn.setAttribute('aria-pressed', String(btn.dataset.pos === settings.clockPosition));
+  });
   $('credit').hidden = !settings.credit || !playlist.current;
   $('btn-info').setAttribute('aria-pressed', String(settings.credit));
   $('btn-play').textContent = playing ? '⏸' : '▶';
@@ -241,6 +246,14 @@ function bindEvents() {
     $('interval-value').textContent = formatInterval(settings.interval);
   });
   $('interval').addEventListener('change', () => { store.save(settings); if (playing) scheduleNext(); });
+
+  $('clock-position').querySelectorAll('.pos-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      settings.clockPosition = btn.dataset.pos;
+      store.save(settings);
+      syncControls();
+    });
+  });
 
   bindSwitch('opt-kenburns', 'kenburns');
   bindSwitch('opt-clock', 'clock', () => { syncControls(); });
