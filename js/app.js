@@ -28,6 +28,8 @@ let idleTimer = null;
 let clockTimer = null;
 let statusTimer = null;
 let installPrompt = null;
+let swRegistration = null;
+let swRefreshing = false;
 
 const viewer = new Viewer($('stage'));
 const playlist = new Playlist(status);
@@ -440,6 +442,7 @@ function bindEvents() {
       // 環境音は意図的に止めない。ブラウザがバックグラウンドで ctx を
       // サスペンドしていた場合のみ、復帰時にレジュームを試みる。
       if (audio.blocked) audio.ensureContext();
+      checkForUpdate();
     } else {
       clearTimeout(timer);
     }
@@ -561,13 +564,42 @@ function showInstallButton() {
   $('btn-clear-cache').parentElement.prepend(btn);
 }
 
+/**
+ * Service Worker を登録し、起動時と再開時にサーバー側の最新版と照合する。
+ * 新しいバージョンが見つかって制御が切り替わったら、ページを再読み込みして反映する。
+ */
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {
-      /* file:// で開いた場合など。オフライン対応が無効になるだけ */
-    });
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (swRefreshing) return;
+    swRefreshing = true;
+    window.location.reload();
   });
+
+  window.addEventListener('load', async () => {
+    try {
+      swRegistration = await navigator.serviceWorker.register('./sw.js');
+      checkForUpdate();
+      swRegistration.addEventListener('updatefound', () => {
+        const worker = swRegistration.installing;
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          // controller が既にあるなら初回インストールではなく更新
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            status('新しいバージョンに更新します…');
+          }
+        });
+      });
+    } catch {
+      /* file:// で開いた場合など。オフライン対応が無効になるだけ */
+    }
+  });
+}
+
+/** サーバー側の sw.js を取得し直し、更新があれば適用する（起動時・再開時に呼ぶ）。 */
+function checkForUpdate() {
+  swRegistration?.update().catch(() => {});
 }
 
 /** 秒単位の間隔を「5分」「90分」のような表示用ラベルにする。 */

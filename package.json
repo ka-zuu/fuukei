@@ -1,6 +1,7 @@
 {
   "name": "fuukei",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "風景を表示するだけの PWA ビューア",
   "scripts": {
