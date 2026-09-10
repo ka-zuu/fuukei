@@ -2,7 +2,7 @@
 // 画像そのものは Service Worker の Cache Storage 側で持つ（sw.js を参照）。
 
 // sw.js の IMG_CACHE と同じ名前を使う（バージョンを上げるときは両方直す）
-export const IMG_CACHE_NAME = 'fuukei-img-v1';
+export const IMG_CACHE_NAME = 'fuukei-img-v2';
 
 const DB_NAME = 'fuukei';
 const DB_VERSION = 1;
