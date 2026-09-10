@@ -3,10 +3,13 @@
 
 const ENDPOINT = 'https://commons.wikimedia.org/w/api.php';
 const PAGE_SIZE = 50; // 匿名アクセスの上限
+// CirrusSearch の srsearch は 300 文字まで（filetype:/filew: は文字数に含まれない）。
+// ラベルや雰囲気を複数選択すると検索語自体が伸びるので、除外語は入るだけ足す方式にする。
+const SEARCH_BUDGET = 280;
 
 // 絵画・イラスト・図版など「写真ではない」ものを弾くためのキーワード。
-// 検索クエリの除外語（サーバー側で減らす）と、取得後のタイトル/説明文/カテゴリの
-// 再チェック（クライアント側で確実に弾く）の両方に使う。
+// クライアント側の再チェック（タイトル・説明文・カテゴリ）は全件をフルに使うが、
+// 検索クエリへの除外語は文字数上限があるため、効果の大きい語だけ先頭から入るだけ使う。
 const ART_TERMS = [
   'painting', 'illustration', 'drawing', 'sketch', 'engraving', 'etching',
   'lithograph', 'woodcut', 'watercolor', 'watercolour', 'gouache', 'fresco',
@@ -80,9 +83,20 @@ export async function fetchPage({ terms, width, minWidth, allowPortrait, offset,
 }
 
 function buildSearch(terms, minWidth) {
-  const parts = [terms.join(' '), 'filetype:bitmap'];
+  const subject = terms.join(' ');
+  // 文字数上限（filetype:/filew: を除いて300）に収まる分だけ除外語を足す。
+  // 効果の大きい語から並べているので、削れるのは末尾の優先度が低いものから。
+  const negatives = [];
+  let used = subject.length;
+  for (const t of ART_TERMS) {
+    const clause = t.includes(' ') ? `-"${t}"` : `-${t}`;
+    if (used + 1 + clause.length > SEARCH_BUDGET) break;
+    negatives.push(clause);
+    used += 1 + clause.length;
+  }
+  const parts = [subject, 'filetype:bitmap'];
   if (minWidth) parts.push(`filew:>${minWidth}`);
-  parts.push(...ART_TERMS.map((t) => (t.includes(' ') ? `-"${t}"` : `-${t}`)));
+  parts.push(...negatives);
   return parts.join(' ');
 }
 
