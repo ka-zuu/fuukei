@@ -8,6 +8,8 @@ import { Viewer } from './viewer.js';
 import { WakeGuard } from './wakelock.js';
 import * as fullscreen from './fullscreen.js';
 import { clearAll, usage } from './cache.js';
+import { SOUNDS } from './audio/sounds.js';
+import { AudioEngine } from './audio/engine.js';
 
 const $ = (id) => document.getElementById(id);
 const IDLE_MS = 3500;
@@ -32,16 +34,19 @@ const playlist = new Playlist(status);
 const wake = new WakeGuard(({ active, method }) => {
   if (active && method === 'video') status('スリープ抑制を代替手段で有効にしました');
 });
+const audio = new AudioEngine({ onStateChange: onAudioState });
 
 boot();
 
 function boot() {
   renderChips();
   renderAiOptions();
+  renderSounds();
   syncControls();
   bindEvents();
   registerServiceWorker();
   updateCacheNote();
+  armAudioUnlock();
 
   playlist.configure(settings);
   status('風景を読み込んでいます…');
@@ -113,6 +118,46 @@ function renderAiOptions() {
   );
 }
 
+function renderSounds() {
+  $('sounds').replaceChildren(
+    ...SOUNDS.map((s) => chip(`${s.emoji} ${s.name}`, s.id, () => {
+      settings.audio.enabled = toggleIn(settings.audio.enabled, s.id);
+      commitAudio();
+      renderSounds();
+    }, settings.audio.enabled.includes(s.id)))
+  );
+  renderSoundMixer();
+}
+
+/** 有効な環境音だけ、個別音量スライダーの行を並べる。 */
+function renderSoundMixer() {
+  $('sound-mixer').replaceChildren(
+    ...SOUNDS.filter((s) => settings.audio.enabled.includes(s.id)).map((s) => {
+      const row = document.createElement('div');
+      row.className = 'mixer-row';
+
+      const label = document.createElement('span');
+      label.textContent = `${s.emoji} ${s.name}`;
+
+      const range = document.createElement('input');
+      range.type = 'range';
+      range.min = '0';
+      range.max = '100';
+      range.step = '1';
+      range.value = String(Math.round((settings.audio.volumes[s.id] ?? 0.5) * 100));
+      range.setAttribute('aria-label', `${s.name}の音量`);
+      range.addEventListener('input', (e) => {
+        settings.audio.volumes[s.id] = Number(e.target.value) / 100;
+        audio.apply(settings.audio);
+      });
+      range.addEventListener('change', () => store.save(settings));
+
+      row.append(label, range);
+      return row;
+    })
+  );
+}
+
 function syncControls() {
   $('interval').value = settings.interval;
   $('interval-value').textContent = formatInterval(settings.interval);
@@ -141,6 +186,13 @@ function syncControls() {
   $('credit').hidden = !settings.credit || !playlist.current;
   $('btn-info').setAttribute('aria-pressed', String(settings.credit));
   $('btn-play').textContent = playing ? '⏸' : '▶';
+
+  const masterPct = Math.round(settings.audio.master * 100);
+  $('opt-master-volume').value = String(masterPct);
+  $('master-volume-value').textContent = `${masterPct}%`;
+  $('btn-mute').textContent = settings.audio.muted ? '🔇' : '🔊';
+  $('btn-mute').setAttribute('aria-pressed', String(settings.audio.muted));
+
   toggleClock();
 }
 
@@ -154,6 +206,48 @@ function commit(restart = false) {
       return;
     }
     advance(1);
+  }
+}
+
+/* ---------------- 環境音 ---------------- */
+
+/**
+ * 環境音の設定を保存しエンジンに反映する。チップのクリックなど、ユーザー操作の
+ * ハンドラから呼ぶこと（AudioContext の生成/resume がユーザー操作起因である必要があるため）。
+ */
+async function commitAudio() {
+  store.save(settings);
+  const ok = await audio.apply(settings.audio);
+  if (settings.audio.enabled.length && !settings.audio.muted && !ok) {
+    status(audio.supported
+      ? 'ブラウザが音声をブロックしています。画面を一度操作してください。'
+      : 'このブラウザでは環境音を再生できません。', 'error');
+  }
+}
+
+function toggleMute() {
+  settings.audio.muted = !settings.audio.muted;
+  store.save(settings);
+  if (settings.audio.enabled.length || audio.running || audio.blocked) audio.apply(settings.audio);
+  syncControls();
+  status(settings.audio.muted ? '環境音をミュートしました' : '環境音のミュートを解除しました');
+}
+
+/** 自動再生ポリシー対策: 前回オンだった環境音を、次に開いたときの最初の操作で鳴らし直す。 */
+function armAudioUnlock() {
+  if (!settings.audio.enabled.length) return;
+  const unlock = () => {
+    document.removeEventListener('pointerdown', unlock);
+    document.removeEventListener('keydown', unlock);
+    commitAudio();
+  };
+  document.addEventListener('pointerdown', unlock, { passive: true });
+  document.addEventListener('keydown', unlock);
+}
+
+function onAudioState({ blocked }) {
+  if (blocked && settings.audio.enabled.length && !settings.audio.muted) {
+    status('ブラウザが音声をブロックしています。画面を一度操作してください。', 'error');
   }
 }
 
@@ -247,6 +341,14 @@ function bindEvents() {
   });
   $('interval').addEventListener('change', () => { store.save(settings); if (playing) scheduleNext(); });
 
+  $('opt-master-volume').addEventListener('input', (e) => {
+    settings.audio.master = Number(e.target.value) / 100;
+    $('master-volume-value').textContent = `${e.target.value}%`;
+    audio.apply(settings.audio);
+  });
+  $('opt-master-volume').addEventListener('change', () => store.save(settings));
+  $('btn-mute').addEventListener('click', toggleMute);
+
   $('clock-position').querySelectorAll('.pos-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       settings.clockPosition = btn.dataset.pos;
@@ -304,8 +406,10 @@ function bindEvents() {
   $('btn-reset').addEventListener('click', () => {
     settings = store.reset();
     renderChips();
+    renderSounds();
     syncControls();
     playlist.configure(settings);
+    if (audio.running || audio.blocked) audio.apply(settings.audio);
     advance(1);
     status('設定を初期化しました');
   });
@@ -331,8 +435,14 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && playing) scheduleNext();
-    else clearTimeout(timer);
+    if (document.visibilityState === 'visible') {
+      if (playing) scheduleNext();
+      // 環境音は意図的に止めない。ブラウザがバックグラウンドで ctx を
+      // サスペンドしていた場合のみ、復帰時にレジュームを試みる。
+      if (audio.blocked) audio.ensureContext();
+    } else {
+      clearTimeout(timer);
+    }
   });
 }
 
@@ -356,6 +466,7 @@ function onKeyDown(e) {
   else if (key === 'f') toggleFullscreen();
   else if (key === 's') togglePanel($('panel').hidden);
   else if (key === 'i') $('btn-info').click();
+  else if (key === 'm') toggleMute();
   else if (e.key === 'Escape') togglePanel(false);
 }
 

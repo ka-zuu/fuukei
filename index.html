@@ -47,6 +47,7 @@
   </div>
   <div class="spacer"></div>
   <button id="btn-info" class="icon-btn" title="クレジット表示 (I)" aria-label="クレジット表示">ⓘ</button>
+  <button id="btn-mute" class="icon-btn" title="環境音のミュート (M)" aria-label="環境音のミュート" aria-pressed="false">🔊</button>
   <button id="btn-full" class="icon-btn" title="全画面 (F)" aria-label="全画面">⛶</button>
 </header>
 
@@ -135,6 +136,20 @@
     </section>
 
     <section>
+      <h2>環境音 <small>（複数選択可・重ねられます）</small></h2>
+      <div id="sounds" class="chips"></div>
+      <div id="sound-mixer" class="sound-mixer"></div>
+      <label class="field">
+        <span>全体の音量 <b id="master-volume-value">60%</b></span>
+        <input id="opt-master-volume" type="range" min="0" max="100" step="1" value="60">
+      </label>
+      <p class="note" id="sound-note">
+        音声ファイルは使わず、すべてブラウザ内で合成しています。自動再生の制限により、
+        最初に音を鳴らすには画面をどこか一度操作（タップ/クリック/キー入力）してください。
+      </p>
+    </section>
+
+    <section>
       <h2>画質</h2>
       <label class="field">
         <span>取得サイズ</span>
@@ -164,6 +179,7 @@
         <li><kbd>Space</kbd> 再生/一時停止</li>
         <li><kbd>←</kbd> <kbd>→</kbd> 前後の画像</li>
         <li><kbd>F</kbd> 全画面 / <kbd>S</kbd> 設定 / <kbd>I</kbd> クレジット</li>
+        <li><kbd>M</kbd> 環境音のミュート</li>
         <li><kbd>Esc</kbd> 閉じる</li>
       </ul>
     </section>

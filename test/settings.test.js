@@ -1,8 +1,10 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, load, save, reset, resolveWidth } from '../js/settings.js';
+import { DEFAULTS, load, save, reset, resolveWidth, clamp01 } from '../js/settings.js';
+import { SOUNDS } from '../js/audio/sounds.js';
 
 const KEY = 'fuukei.settings.v1';
+const [SOUND_A, SOUND_B] = SOUNDS.map((s) => s.id);
 
 beforeEach(() => {
   localStorage.clear();
@@ -43,11 +45,67 @@ describe('load', () => {
     localStorage.setItem(KEY, JSON.stringify({ interval: 600 }));
     assert.equal(load().interval, 600);
   });
+
+  test('audio が無い旧設定でも DEFAULTS.audio と一致する', () => {
+    localStorage.setItem(KEY, JSON.stringify({ category: 'sea' }));
+    assert.deepEqual(load().audio, DEFAULTS.audio);
+  });
+
+  test('audio.master だけ保存しても他のキーは既定値のまま（丸ごと上書きされない）', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { master: 0.3 } }));
+    const loaded = load();
+    assert.equal(loaded.audio.master, 0.3);
+    assert.equal(loaded.audio.muted, DEFAULTS.audio.muted);
+    assert.deepEqual(loaded.audio.enabled, DEFAULTS.audio.enabled);
+    assert.deepEqual(loaded.audio.volumes, DEFAULTS.audio.volumes);
+  });
+
+  test('audio.volumes を1つだけ保存しても、他の音の既定音量は消えない', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { volumes: { [SOUND_A]: 0.9 } } }));
+    const loaded = load();
+    assert.equal(loaded.audio.volumes[SOUND_A], 0.9);
+    assert.equal(loaded.audio.volumes[SOUND_B], DEFAULTS.audio.volumes[SOUND_B]);
+  });
+
+  test('audio.enabled の未知の id は除去される', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { enabled: [SOUND_A, '廃止済みの音'] } }));
+    assert.deepEqual(load().audio.enabled, [SOUND_A]);
+  });
+
+  test('audio.enabled の重複は除去される', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { enabled: [SOUND_A, SOUND_A] } }));
+    assert.deepEqual(load().audio.enabled, [SOUND_A]);
+  });
+
+  test('audio.master / volumes の範囲外や不正な値は 0〜1 にクランプされる', () => {
+    localStorage.setItem(KEY, JSON.stringify({
+      audio: { master: 2.5, muted: 1, volumes: { [SOUND_A]: -1, [SOUND_B]: 'うるさい' } }
+    }));
+    const loaded = load();
+    assert.equal(loaded.audio.master, 1);
+    assert.equal(loaded.audio.muted, true);
+    assert.equal(loaded.audio.volumes[SOUND_A], 0);
+    assert.equal(loaded.audio.volumes[SOUND_B], DEFAULTS.audio.volumes[SOUND_B]);
+  });
 });
 
 describe('save / load のラウンドトリップ', () => {
   test('save したものが load で戻ってくる', () => {
     const custom = { ...DEFAULTS, category: 'polar', interval: 120 };
+    save(custom);
+    assert.deepEqual(load(), custom);
+  });
+
+  test('audio をカスタマイズしたものも往復する', () => {
+    const custom = {
+      ...DEFAULTS,
+      audio: {
+        master: 0.2,
+        muted: true,
+        enabled: [SOUND_A],
+        volumes: { ...DEFAULTS.audio.volumes, [SOUND_A]: 0.9 }
+      }
+    };
     save(custom);
     assert.deepEqual(load(), custom);
   });
@@ -60,6 +118,31 @@ describe('reset', () => {
     assert.deepEqual(result, DEFAULTS);
     assert.equal(localStorage.getItem(KEY), null);
     assert.deepEqual(load(), DEFAULTS);
+  });
+
+  test('audio は毎回独立した新しいオブジェクトを返す（DEFAULTS と共有しない）', () => {
+    const a = reset();
+    a.audio.enabled.push(SOUND_A);
+    const b = reset();
+    assert.deepEqual(b.audio.enabled, []);
+    assert.deepEqual(DEFAULTS.audio.enabled, []);
+  });
+});
+
+describe('clamp01', () => {
+  test('範囲内はそのまま', () => {
+    assert.equal(clamp01(0.4), 0.4);
+  });
+
+  test('範囲外は 0〜1 にクランプされる', () => {
+    assert.equal(clamp01(-1), 0);
+    assert.equal(clamp01(2), 1);
+  });
+
+  test('数値化できない値は fallback を返す', () => {
+    assert.equal(clamp01('うるさい', 0.5), 0.5);
+    assert.equal(clamp01(undefined, 0.7), 0.7);
+    assert.equal(clamp01(NaN), 0);
   });
 });
 
