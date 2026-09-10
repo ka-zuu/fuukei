@@ -330,6 +330,17 @@ body.idle #vignette { opacity: .35; }
 .switch { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: .87rem; cursor: pointer; }
 .switch input { accent-color: var(--accent); width: 17px; height: 17px; }
 
+.sound-mixer { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px; }
+.mixer-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: .8rem;
+  color: var(--muted);
+}
+.mixer-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+
 .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .btn {
   border-radius: 10px;
