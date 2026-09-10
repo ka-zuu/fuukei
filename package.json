@@ -1,0 +1,12 @@
+{
+  "name": "fuukei",
+  "private": true,
+  "type": "module",
+  "description": "風景を表示するだけの PWA ビューア",
+  "scripts": {
+    "test": "node --test --import ./test/setup.js test/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}
