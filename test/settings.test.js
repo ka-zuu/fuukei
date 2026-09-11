@@ -87,6 +87,23 @@ describe('load', () => {
     assert.equal(loaded.audio.volumes[SOUND_A], 0);
     assert.equal(loaded.audio.volumes[SOUND_B], DEFAULTS.audio.volumes[SOUND_B]);
   });
+
+  test('audio.width が無い旧設定では既定値になる', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { master: 0.3 } }));
+    assert.equal(load().audio.width, DEFAULTS.audio.width);
+  });
+
+  test('audio.width を保存すれば読み込みに反映される', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { width: 0.3 } }));
+    assert.equal(load().audio.width, 0.3);
+  });
+
+  test('audio.width の範囲外の値は 0〜1 にクランプされる', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { width: 5 } }));
+    assert.equal(load().audio.width, 1);
+    localStorage.setItem(KEY, JSON.stringify({ audio: { width: -2 } }));
+    assert.equal(load().audio.width, 0);
+  });
 });
 
 describe('save / load のラウンドトリップ', () => {
@@ -102,6 +119,7 @@ describe('save / load のラウンドトリップ', () => {
       audio: {
         master: 0.2,
         muted: true,
+        width: 0.4,
         enabled: [SOUND_A],
         volumes: { ...DEFAULTS.audio.volumes, [SOUND_A]: 0.9 }
       }

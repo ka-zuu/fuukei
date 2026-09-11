@@ -22,6 +22,7 @@ export const DEFAULTS = {
   audio: {
     master: 0.6,
     muted: false,
+    width: 0.8,           // ステレオ幅。0=モノラル、1=元のステレオ幅
     enabled: [],          // 鳴らす環境音の id（例: ['rain', 'fire']）。複数可
     volumes: Object.fromEntries(SOUND_IDS.map((id) => [id, 0.5]))
   },
@@ -70,6 +71,7 @@ function mergeAudio(saved) {
   return {
     master: clamp01(src.master, DEFAULTS.audio.master),
     muted: Boolean(src.muted),
+    width: clamp01(src.width, DEFAULTS.audio.width),
     enabled,
     volumes
   };

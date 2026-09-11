@@ -52,13 +52,16 @@ const FILLERS = { white: fillWhite, pink: fillPink, brown: fillBrown };
  * seconds は長めに取るほど反復が気づかれにくくなるが、生成コストとメモリも増える。
  * 6 秒あれば十分で、engine 側で playbackRate をずらした多重再生と組み合わせて
  * 体感的な反復周期をさらに伸ばす想定。
+ *
+ * 2ch で生成し、左右チャンネルを同じ rng ストリームの続きで独立に埋める。
+ * これにより左右が無相関になり、下流のフィルタ/ゲインを一切変えずに
+ * 音源全体がステレオの広がりを持つ（モノラル再生でも打ち消し合わず -3dB 下がるだけ）。
  */
 export function createNoiseBuffer(ctx, kind, seconds = 6, rng = Math.random) {
   const fill = FILLERS[kind];
   if (!fill) throw new Error(`未知のノイズ種別: ${kind}`);
   const length = Math.round(ctx.sampleRate * seconds);
-  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  fill(data, rng);
+  const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) fill(buffer.getChannelData(ch), rng);
   return buffer;
 }

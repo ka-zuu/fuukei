@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { fillWhite, fillPink, fillBrown, createNoiseBuffer } from '../js/audio/noise.js';
 import { poissonDelay, createScheduler } from '../js/audio/scheduler.js';
 import { SOUNDS, getSound } from '../js/audio/sounds.js';
+import { createWidthStage } from '../js/audio/width.js';
 import { DEFAULTS } from '../js/settings.js';
 
 /** シード付きの決定論的 rng（テストの再現性のため）。 */
@@ -59,13 +60,17 @@ describe('fillWhite / fillPink / fillBrown', () => {
 });
 
 describe('createNoiseBuffer', () => {
-  /** AudioContext.createBuffer 相当の最小モック。 */
+  /**
+   * AudioContext.createBuffer 相当の最小モック。
+   * チャンネルごとに独立した配列を持つ（実際の AudioBuffer と同様）。
+   * これが単一配列の使い回しだと、モノラル実装に戻すバグをテストが見逃してしまう。
+   */
   function fakeCtx(sampleRate = 8000) {
     return {
       sampleRate,
       createBuffer(channels, length) {
-        const data = new Float32Array(length);
-        return { length, getChannelData: () => data };
+        const data = Array.from({ length: channels }, () => new Float32Array(length));
+        return { length, numberOfChannels: channels, getChannelData: (i) => data[i] };
       }
     };
   }
@@ -79,6 +84,93 @@ describe('createNoiseBuffer', () => {
   test('未知のノイズ種別は例外を投げる', () => {
     const ctx = fakeCtx();
     assert.throws(() => createNoiseBuffer(ctx, 'green'));
+  });
+
+  test('2ch で生成される（ステレオの広がりの土台）', () => {
+    const ctx = fakeCtx();
+    for (const kind of ['white', 'pink', 'brown']) {
+      const buffer = createNoiseBuffer(ctx, kind, 1, seededRng(1));
+      assert.equal(buffer.numberOfChannels, 2);
+    }
+  });
+
+  test('左右チャンネルが無相関になる（同一内容ではない）', () => {
+    const ctx = fakeCtx();
+    for (const kind of ['white', 'pink', 'brown']) {
+      const buffer = createNoiseBuffer(ctx, kind, 1, seededRng(9));
+      const l = buffer.getChannelData(0);
+      const r = buffer.getChannelData(1);
+      assert.notDeepEqual(Array.from(l), Array.from(r), `${kind}: 左右が同一になってはいけない`);
+    }
+  });
+
+  test('各チャンネルが単独でも有限かつ非定数', () => {
+    const ctx = fakeCtx();
+    const buffer = createNoiseBuffer(ctx, 'pink', 1, seededRng(3));
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buffer.getChannelData(ch);
+      assert.ok(Array.from(data).every(Number.isFinite));
+      assert.ok(new Set(data).size > 1);
+    }
+  });
+});
+
+describe('createWidthStage', () => {
+  /**
+   * ノード生成を記録する軽量な AudioContext モック。
+   * createGain は実装順に midL, midR, sideL, sideR, sideW, sideWInv の 6 個生成される。
+   */
+  function fakeCtx() {
+    const created = [];
+    const ctx = {
+      createChannelSplitter: () => ({ connect() { return this; } }),
+      createChannelMerger: () => ({ connect() { return this; } }),
+      createGain: () => {
+        const g = { gain: { value: 0, setTargetAtTime(v) { this.value = v; } }, connect() { return this; } };
+        created.push(g);
+        return g;
+      }
+    };
+    return { ctx, created };
+  }
+
+  function sideGains(created) {
+    const [, , , , sideW, sideWInv] = created;
+    return { sideW, sideWInv };
+  }
+
+  test('w=0 でモノラル（side成分が完全に消える）', () => {
+    const { ctx, created } = fakeCtx();
+    createWidthStage(ctx).setWidth(0);
+    const { sideW, sideWInv } = sideGains(created);
+    assert.equal(sideW.gain.value, 0);
+    assert.equal(sideWInv.gain.value, -0);
+  });
+
+  test('w=0.7 で side ゲインが +0.7 / -0.7 になる', () => {
+    const { ctx, created } = fakeCtx();
+    createWidthStage(ctx).setWidth(0.7);
+    const { sideW, sideWInv } = sideGains(created);
+    assert.equal(sideW.gain.value, 0.7);
+    assert.equal(sideWInv.gain.value, -0.7);
+  });
+
+  test('範囲外の値は 0〜1 にクランプされる', () => {
+    const over = fakeCtx();
+    createWidthStage(over.ctx).setWidth(2);
+    assert.equal(sideGains(over.created).sideW.gain.value, 1);
+
+    const under = fakeCtx();
+    createWidthStage(under.ctx).setWidth(-1);
+    assert.equal(sideGains(under.created).sideW.gain.value, 0);
+  });
+
+  test('at/smooth を渡すと setTargetAtTime 経由でランプされる', () => {
+    const { ctx, created } = fakeCtx();
+    createWidthStage(ctx).setWidth(0.5, 1.0, 0.05);
+    const { sideW, sideWInv } = sideGains(created);
+    assert.equal(sideW.gain.value, 0.5);
+    assert.equal(sideWInv.gain.value, -0.5);
   });
 });
 
