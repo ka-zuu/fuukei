@@ -195,6 +195,10 @@ function syncControls() {
   $('btn-mute').textContent = settings.audio.muted ? '🔇' : '🔊';
   $('btn-mute').setAttribute('aria-pressed', String(settings.audio.muted));
 
+  const widthPct = Math.round(settings.audio.width * 100);
+  $('opt-stereo-width').value = String(widthPct);
+  $('stereo-width-value').textContent = `${widthPct}%`;
+
   toggleClock();
 }
 
@@ -350,6 +354,13 @@ function bindEvents() {
   });
   $('opt-master-volume').addEventListener('change', () => store.save(settings));
   $('btn-mute').addEventListener('click', toggleMute);
+
+  $('opt-stereo-width').addEventListener('input', (e) => {
+    settings.audio.width = Number(e.target.value) / 100;
+    $('stereo-width-value').textContent = `${e.target.value}%`;
+    audio.apply(settings.audio);
+  });
+  $('opt-stereo-width').addEventListener('change', () => store.save(settings));
 
   $('clock-position').querySelectorAll('.pos-btn').forEach((btn) => {
     btn.addEventListener('click', () => {

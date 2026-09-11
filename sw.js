@@ -1,6 +1,6 @@
 // Service Worker: アプリシェルのオフライン化と、画像の上限つきキャッシュ。
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const APP_CACHE = `fuukei-app-${VERSION}`;
 const IMG_CACHE = `fuukei-img-${VERSION}`;
 const IMG_MAX_ENTRIES = 120;
@@ -22,6 +22,7 @@ const APP_SHELL = [
   './js/audio/noise.js',
   './js/audio/scheduler.js',
   './js/audio/sounds.js',
+  './js/audio/width.js',
   './js/sources/commons.js',
   './js/sources/openverse.js',
   './js/sources/ai.js',

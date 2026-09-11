@@ -4,6 +4,7 @@
 import { createNoiseBuffer } from './noise.js';
 import { createScheduler } from './scheduler.js';
 import { getSound } from './sounds.js';
+import { createWidthStage } from './width.js';
 
 const FADE_SECONDS = 1.2; // レイヤーの開始/停止フェード
 const VOLUME_SMOOTH = 0.05; // スライダー操作時のランプ時定数
@@ -24,6 +25,7 @@ export class AudioEngine {
     this.onStateChange = onStateChange || (() => {});
     this.ctx = null;
     this.master = null;
+    this.width = null;
     this.compressor = null;
     this.buffers = null;
     this.scheduler = null;
@@ -62,6 +64,10 @@ export class AudioEngine {
       this.master = ctx.createGain();
       this.master.gain.value = 0;
 
+      // ステレオ幅（Mid/Side）。コンプレッサーより前に置く
+      // （コンプレッサーは全ch単一のゲインリダクションなので音像には影響しない）。
+      this.width = createWidthStage(ctx);
+
       // 複数レイヤーを重ねた際のクリッピング防止用リミッター。常時オン。
       this.compressor = ctx.createDynamicsCompressor();
       this.compressor.threshold.value = -6;
@@ -70,7 +76,8 @@ export class AudioEngine {
       this.compressor.attack.value = 0.003;
       this.compressor.release.value = 0.25;
 
-      this.master.connect(this.compressor).connect(ctx.destination);
+      this.master.connect(this.width.input);
+      this.width.output.connect(this.compressor).connect(ctx.destination);
 
       this.buffers = {
         white: createNoiseBuffer(ctx, 'white'),
@@ -123,6 +130,7 @@ export class AudioEngine {
     const target = settings.muted ? 0 : clamp01(settings.master);
     const now = this.ctx.currentTime;
     this.master.gain.setTargetAtTime(target, now, VOLUME_SMOOTH);
+    this.width.setWidth(clamp01(settings.width ?? 0.8), now, VOLUME_SMOOTH);
   }
 
   _startLayer(id, volume) {

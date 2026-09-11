@@ -77,7 +77,7 @@ function createSwellLoop(ctx, apply, { periodMin, periodMax }, rng = Math.random
   };
 }
 
-/** 焚き火のパチパチ: ノイズを短く切り出し、帯域を絞って指数減衰させる。 */
+/** 焚き火のパチパチ: ノイズを短く切り出し、帯域を絞って指数減衰させ、毎回ランダムな位置に定位させる。 */
 function scheduleCrackle(ctx, buffer, destination, at, rng = Math.random) {
   const src = ctx.createBufferSource();
   src.buffer = buffer;
@@ -95,12 +95,15 @@ function scheduleCrackle(ctx, buffer, destination, at, rng = Math.random) {
   g.gain.linearRampToValueAtTime(peak, at + 0.003);
   g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
 
-  src.connect(bp).connect(g).connect(destination);
+  const pan = ctx.createStereoPanner();
+  pan.pan.value = (rng() * 2 - 1) * 0.8; // 焚き火の周囲でランダムに弾ける
+
+  src.connect(bp).connect(g).connect(pan).connect(destination);
   src.start(at, offset, dur + 0.02);
-  src.onended = () => { disconnectSafe(src); disconnectSafe(bp); disconnectSafe(g); };
+  src.onended = () => { disconnectSafe(src); disconnectSafe(bp); disconnectSafe(g); disconnectSafe(pan); };
 }
 
-/** 川の泡: 短く急上昇して消える減衰サイン。 */
+/** 川の泡: 短く急上昇して消える減衰サイン。毎回ランダムな位置に定位させる。 */
 function scheduleBubble(ctx, destination, at, rng = Math.random) {
   const osc = ctx.createOscillator();
   osc.type = 'sine';
@@ -116,10 +119,13 @@ function scheduleBubble(ctx, destination, at, rng = Math.random) {
   g.gain.exponentialRampToValueAtTime(peak, at + dur * 0.3);
   g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
 
-  osc.connect(g).connect(destination);
+  const pan = ctx.createStereoPanner();
+  pan.pan.value = (rng() * 2 - 1) * 0.7; // 川幅のどこかで弾ける
+
+  osc.connect(g).connect(pan).connect(destination);
   osc.start(at);
   osc.stop(at + dur + 0.02);
-  osc.onended = () => { disconnectSafe(osc); disconnectSafe(g); };
+  osc.onended = () => { disconnectSafe(osc); disconnectSafe(g); disconnectSafe(pan); };
 }
 
 /* ---------------- 雨 ---------------- */
@@ -230,16 +236,20 @@ function createRiver(ctx, shared) {
   bedPink.output.connect(bedGain);
 
   // 中心周波数が個別にゆっくり動くバンドパスを3本並列にすることで、
-  // 「ただのシャー音」ではなく共振ピークが動く「流れる水」に聞こえる
+  // 「ただのシャー音」ではなく共振ピークが動く「流れる水」に聞こえる。
+  // 各バンドを左中右に固定配置し、川幅のある流れに聞こえるようにする
   const bandCenters = [650, 1150, 2000];
-  const bands = bandCenters.map((freq) => {
+  const bandPans = [-0.55, 0.05, 0.6];
+  const bands = bandCenters.map((freq, i) => {
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
     bp.frequency.value = freq;
     bp.Q.value = 1.2;
     const g = ctx.createGain();
     g.gain.value = 0.35;
-    bedGain.connect(bp).connect(g).connect(output);
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = bandPans[i];
+    bedGain.connect(bp).connect(g).connect(pan).connect(output);
 
     const lfo = ctx.createOscillator();
     lfo.type = 'sine';
@@ -247,7 +257,7 @@ function createRiver(ctx, shared) {
     const depth = ctx.createGain();
     depth.gain.value = freq * 0.35;
     lfo.connect(depth).connect(bp.frequency);
-    return { bp, g, lfo, depth };
+    return { bp, g, pan, lfo, depth };
   });
 
   // 泡: 疎らに混ぜることで自然さが増す
@@ -276,7 +286,7 @@ function createRiver(ctx, shared) {
     },
     dispose() {
       [bedBrown.output, bedPink.output, bedGain, bubbleGain, output,
-        ...bands.flatMap((b) => [b.bp, b.g, b.lfo, b.depth])].forEach(disconnectSafe);
+        ...bands.flatMap((b) => [b.bp, b.g, b.pan, b.lfo, b.depth])].forEach(disconnectSafe);
     }
   };
 }
@@ -291,9 +301,12 @@ function createWaves(ctx, shared) {
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 700;
-  body.output.connect(lp).connect(output);
+  const pan = ctx.createStereoPanner();
+  pan.pan.value = 0;
+  body.output.connect(lp).connect(pan).connect(output);
 
-  // 1波ごとのエンベロープ（打ち寄せて引く）。砕けるピークでローパスを開き泡の明るさを出す
+  // 1波ごとのエンベロープ（打ち寄せて引く）。砕けるピークでローパスを開き泡の明るさを出す。
+  // 波ごとに砕ける位置を左右にずらし、寄せては返す幅を感じさせる
   const swell = createSwellLoop(ctx, (at, rng) => {
     const peakGain = 0.55 + rng() * 0.35;
     const peakFreq = 1300 + rng() * 900;
@@ -301,6 +314,9 @@ function createWaves(ctx, shared) {
     const decay = 2.4 + rng() * 1.6;
     rampSwell(output.gain, 0, peakGain, at, attack, decay);
     rampSwell(lp.frequency, 700, peakFreq, at, attack, decay);
+    pan.pan.cancelScheduledValues(at);
+    pan.pan.setValueAtTime(pan.pan.value, at);
+    pan.pan.linearRampToValueAtTime((rng() * 2 - 1) * 0.35, at + attack);
   }, { periodMin: 7, periodMax: 12 });
 
   return {
@@ -314,7 +330,7 @@ function createWaves(ctx, shared) {
       swell.stop();
     },
     dispose() {
-      [body.output, lp, output].forEach(disconnectSafe);
+      [body.output, lp, pan, output].forEach(disconnectSafe);
     }
   };
 }
@@ -330,14 +346,21 @@ function createWind(ctx, shared) {
   bp.type = 'bandpass';
   bp.frequency.value = 500;
   bp.Q.value = 1.4;
-  body.output.connect(bp).connect(output);
+  const pan = ctx.createStereoPanner();
+  pan.pan.value = 0;
+  body.output.connect(bp).connect(pan).connect(output);
 
-  // 中心周波数をゆっくりしたランダムウォークで動かす（吹き抜ける感じ）
+  // 中心周波数をゆっくりしたランダムウォークで動かす（吹き抜ける感じ）。
+  // 定位も同じ周期でランダムウォークさせ、左右を吹き抜けていく感じを足す
   const wander = createSwellLoop(ctx, (at, rng) => {
     const target = 220 + rng() * 900;
+    const dur = 2.5 + rng() * 2;
     bp.frequency.cancelScheduledValues(at);
     bp.frequency.setValueAtTime(bp.frequency.value, at);
-    bp.frequency.linearRampToValueAtTime(target, at + 2.5 + rng() * 2);
+    bp.frequency.linearRampToValueAtTime(target, at + dur);
+    pan.pan.cancelScheduledValues(at);
+    pan.pan.setValueAtTime(pan.pan.value, at);
+    pan.pan.linearRampToValueAtTime((rng() * 2 - 1) * 0.7, at + dur);
   }, { periodMin: 2.5, periodMax: 5 });
 
   // 突風のエンベロープ
@@ -359,7 +382,7 @@ function createWind(ctx, shared) {
       gust.stop();
     },
     dispose() {
-      [body.output, bp, output].forEach(disconnectSafe);
+      [body.output, bp, pan, output].forEach(disconnectSafe);
     }
   };
 }
