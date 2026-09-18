@@ -4,7 +4,7 @@
 import { createNoiseBuffer } from './noise.js';
 import { createScheduler } from './scheduler.js';
 import { getSound } from './sounds.js';
-import { createWidthStage } from './width.js';
+import { createWidthStage, MAX_WIDTH } from './width.js';
 
 const FADE_SECONDS = 1.2; // レイヤーの開始/停止フェード
 const VOLUME_SMOOTH = 0.05; // スライダー操作時のランプ時定数
@@ -13,6 +13,12 @@ function clamp01(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 0;
   return Math.min(1, Math.max(0, n));
+}
+
+function clampWidth(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(MAX_WIDTH, Math.max(0, n));
 }
 
 function voiceStopSafe(voice, at) {
@@ -130,7 +136,7 @@ export class AudioEngine {
     const target = settings.muted ? 0 : clamp01(settings.master);
     const now = this.ctx.currentTime;
     this.master.gain.setTargetAtTime(target, now, VOLUME_SMOOTH);
-    this.width.setWidth(clamp01(settings.width ?? 0.8), now, VOLUME_SMOOTH);
+    this.width.setWidth(clampWidth(settings.width ?? 1), now, VOLUME_SMOOTH);
   }
 
   _startLayer(id, volume) {

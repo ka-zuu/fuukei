@@ -1,6 +1,7 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, load, save, reset, resolveWidth, clamp01 } from '../js/settings.js';
+import { DEFAULTS, load, save, reset, resolveWidth, clamp01, clampRange } from '../js/settings.js';
+import { MAX_WIDTH } from '../js/audio/width.js';
 import { SOUNDS } from '../js/audio/sounds.js';
 
 const KEY = 'fuukei.settings.v1';
@@ -98,11 +99,28 @@ describe('load', () => {
     assert.equal(load().audio.width, 0.3);
   });
 
-  test('audio.width の範囲外の値は 0〜1 にクランプされる', () => {
+  test('audio.width の範囲外の値は 0〜MAX_WIDTH にクランプされる', () => {
     localStorage.setItem(KEY, JSON.stringify({ audio: { width: 5 } }));
-    assert.equal(load().audio.width, 1);
+    assert.equal(load().audio.width, MAX_WIDTH);
     localStorage.setItem(KEY, JSON.stringify({ audio: { width: -2 } }));
     assert.equal(load().audio.width, 0);
+  });
+
+  test('audio.width は 1 を超える強調側の値も保持する', () => {
+    localStorage.setItem(KEY, JSON.stringify({ audio: { width: 1.6 } }));
+    assert.equal(load().audio.width, 1.6);
+  });
+});
+
+describe('clampRange', () => {
+  test('0〜max に収める', () => {
+    assert.equal(clampRange(1.5, 2), 1.5);
+    assert.equal(clampRange(3, 2), 2);
+    assert.equal(clampRange(-1, 2), 0);
+  });
+
+  test('数値化できなければ fallback を返す', () => {
+    assert.equal(clampRange('ひろい', 2, 1), 1);
   });
 });
 

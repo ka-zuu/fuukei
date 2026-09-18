@@ -25,6 +25,61 @@ function disconnectSafe(node) {
 }
 
 /**
+ * 無相関ステレオをモノラルに畳むと下がるパワーの補正値（+6dB）。
+ * (L+R)/2 で -3dB、さらに 2ch ぶんのパワーが 1ch になるので -3dB。
+ */
+const MONO_FOLD_MAKEUP = 2;
+
+/**
+ * ステレオ信号を 1ch（(L+R)/2）に畳む GainNode。
+ *
+ * 定位させたい音は必ずこれを通してから StereoPannerNode に入れること。
+ * ノイズ源は左右が無相関なので、そのまま StereoPanner に入れると
+ * 「左右で別々の波形が違う音量で鳴っている」状態にしかならず、
+ * 耳に届く相関が崩れて "どこで鳴ったか" が滲む（実測でも定位が
+ * 相関1.0/16dB差 → 相関0.69/13dB差 まで弱くなる）。
+ * いったんモノラルに畳めば、パンは本来の等パワー則どおりに効く。
+ */
+function toMono(ctx, makeup = MONO_FOLD_MAKEUP) {
+  const g = ctx.createGain();
+  g.channelCount = 1;
+  g.channelCountMode = 'explicit';
+  g.channelInterpretation = 'speakers'; // 2ch→1ch のダウンミックスで (L+R)/2 になる
+  g.gain.value = makeup;
+  return g;
+}
+
+/**
+ * 左右のゲインを逆位相でゆっくり揺らすステージ（オートパン）。
+ *
+ * 無相関ノイズは「広いけれど動かない」ため、ヘッドホンでもステレオだと
+ * 気づきにくい。数十秒周期で音像を左右に振ると、動きが手がかりになって
+ * 広がりがはっきり感じ取れるようになる。
+ */
+function createSwayStage(ctx, { rate = 0.05, depth = 0.3 } = {}) {
+  const splitter = ctx.createChannelSplitter(2);
+  const merger = ctx.createChannelMerger(2);
+
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = rate;
+
+  const nodes = [splitter, merger, lfo];
+  for (const ch of [0, 1]) {
+    const g = ctx.createGain();
+    g.gain.value = 1;
+    const d = ctx.createGain();
+    d.gain.value = ch === 0 ? depth : -depth; // 左右で逆位相にして「振る」
+    lfo.connect(d).connect(g.gain);
+    splitter.connect(g, ch);
+    g.connect(merger, 0, ch);
+    nodes.push(g, d);
+  }
+
+  return { input: splitter, output: merger, lfo, nodes };
+}
+
+/**
  * 同じノイズバッファを playbackRate 違いで2本ループ再生し、加算する。
  * 単独ループだとバッファ長（数秒）ごとの反復に気づかれるが、無理数的な比の
  * 2本を重ねることでほぼ反復しない合成波形になる（生成コストは追加ゼロ）。
@@ -95,12 +150,16 @@ function scheduleCrackle(ctx, buffer, destination, at, rng = Math.random) {
   g.gain.linearRampToValueAtTime(peak, at + 0.003);
   g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
 
+  // ノイズバッファは左右無相関なので、モノラルに畳んでから定位させる
+  const mono = toMono(ctx);
   const pan = ctx.createStereoPanner();
-  pan.pan.value = (rng() * 2 - 1) * 0.8; // 焚き火の周囲でランダムに弾ける
+  pan.pan.value = (rng() * 2 - 1) * 0.9; // 焚き火の周囲でランダムに弾ける
 
-  src.connect(bp).connect(g).connect(pan).connect(destination);
+  src.connect(bp).connect(g).connect(mono).connect(pan).connect(destination);
   src.start(at, offset, dur + 0.02);
-  src.onended = () => { disconnectSafe(src); disconnectSafe(bp); disconnectSafe(g); disconnectSafe(pan); };
+  src.onended = () => {
+    [src, bp, g, mono, pan].forEach(disconnectSafe);
+  };
 }
 
 /** 川の泡: 短く急上昇して消える減衰サイン。毎回ランダムな位置に定位させる。 */
@@ -141,7 +200,12 @@ function createRain(ctx, shared) {
   hp.frequency.value = 450;
   const bodyGain = ctx.createGain();
   bodyGain.gain.value = 0.9;
-  body.output.connect(hp).connect(bodyGain).connect(output);
+
+  // 雨は左右対称の処理しか通らないので、無相関ノイズの「広さ」はあっても
+  // 音像が動かず、ステレオだと気づきにくい。20〜30秒周期で左右に振る。
+  const sway = createSwayStage(ctx, { rate: 0.035 + Math.random() * 0.02, depth: 0.32 });
+  body.output.connect(hp).connect(bodyGain).connect(sway.input);
+  sway.output.connect(output);
 
   // 降りの強弱: ハイパスのカットオフをゆっくり揺らす
   const lfo = ctx.createOscillator();
@@ -167,14 +231,16 @@ function createRain(ctx, shared) {
     start(at) {
       sources.forEach((s) => s.start(at));
       lfo.start(at);
+      sway.lfo.start(at);
     },
     stop(at) {
       sources.forEach((s) => safeStop(s, at));
       safeStop(lfo, at);
+      safeStop(sway.lfo, at);
     },
     dispose() {
-      [body.output, sparkle.output, hp, sparkleHp, bodyGain, sparkleGain, lfo, lfoDepth, output]
-        .forEach(disconnectSafe);
+      [body.output, sparkle.output, hp, sparkleHp, bodyGain, sparkleGain, lfo, lfoDepth, output,
+        ...sway.nodes].forEach(disconnectSafe);
     }
   };
 }
@@ -235,11 +301,17 @@ function createRiver(ctx, shared) {
   bedBrown.output.connect(bedGain);
   bedPink.output.connect(bedGain);
 
+  // 左右に振るバンドは、定位が滲まないようモノラルに畳んでから分ける。
+  // 中央のバンドは振らない（パンしない）ので畳まず、無相関ステレオのまま通して
+  // 拡がりを残す。結果として「中央は広いシャー音、左右に共振ピークが立つ」形になる。
+  const bedMono = toMono(ctx);
+  bedGain.connect(bedMono);
+
   // 中心周波数が個別にゆっくり動くバンドパスを3本並列にすることで、
   // 「ただのシャー音」ではなく共振ピークが動く「流れる水」に聞こえる。
   // 各バンドを左中右に固定配置し、川幅のある流れに聞こえるようにする
   const bandCenters = [650, 1150, 2000];
-  const bandPans = [-0.55, 0.05, 0.6];
+  const bandPans = [-0.85, 0, 0.85];
   const bands = bandCenters.map((freq, i) => {
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
@@ -247,9 +319,17 @@ function createRiver(ctx, shared) {
     bp.Q.value = 1.2;
     const g = ctx.createGain();
     g.gain.value = 0.35;
-    const pan = ctx.createStereoPanner();
-    pan.pan.value = bandPans[i];
-    bedGain.connect(bp).connect(g).connect(pan).connect(output);
+
+    // 振らないバンドは StereoPanner を通さない（pan=0 は何もしないのと同じで、
+    // 通すと無相関ステレオを畳む必要が出てしまい拡がりだけ失う）。
+    let pan = null;
+    if (bandPans[i] === 0) {
+      bedGain.connect(bp).connect(g).connect(output);
+    } else {
+      pan = ctx.createStereoPanner();
+      pan.pan.value = bandPans[i];
+      bedMono.connect(bp).connect(g).connect(pan).connect(output);
+    }
 
     const lfo = ctx.createOscillator();
     lfo.type = 'sine';
@@ -285,8 +365,10 @@ function createRiver(ctx, shared) {
       shared.scheduler.removeJob(jobId);
     },
     dispose() {
-      [bedBrown.output, bedPink.output, bedGain, bubbleGain, output,
-        ...bands.flatMap((b) => [b.bp, b.g, b.pan, b.lfo, b.depth])].forEach(disconnectSafe);
+      [bedBrown.output, bedPink.output, bedGain, bedMono, bubbleGain, output,
+        ...bands.flatMap((b) => [b.bp, b.g, b.pan, b.lfo, b.depth])]
+        .filter(Boolean) // 中央バンドは pan を持たない
+        .forEach(disconnectSafe);
     }
   };
 }
@@ -301,9 +383,21 @@ function createWaves(ctx, shared) {
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 700;
+  // 砕ける位置は定位させたいのでモノラルに畳んでからパンする。
+  // それだけだと音像が点になって海が狭く聞こえるので、無相関のままの
+  // 拡がり成分を薄く足して「定位する波 + 広い海」にする。
+  const mono = toMono(ctx);
   const pan = ctx.createStereoPanner();
   pan.pan.value = 0;
-  body.output.connect(lp).connect(pan).connect(output);
+  // 定位する成分と拡がり成分を混ぜる。2経路は同じ元信号なので（無相関ではなく）
+  // 振幅で足し合わさる。合計が元の音量に揃うよう、実測に合わせた値にしてある。
+  const panGain = ctx.createGain();
+  panGain.gain.value = 0.6;
+  const diffuse = ctx.createGain();
+  diffuse.gain.value = 0.48;
+  body.output.connect(lp);
+  lp.connect(mono).connect(pan).connect(panGain).connect(output);
+  lp.connect(diffuse).connect(output);
 
   // 1波ごとのエンベロープ（打ち寄せて引く）。砕けるピークでローパスを開き泡の明るさを出す。
   // 波ごとに砕ける位置を左右にずらし、寄せては返す幅を感じさせる
@@ -316,7 +410,7 @@ function createWaves(ctx, shared) {
     rampSwell(lp.frequency, 700, peakFreq, at, attack, decay);
     pan.pan.cancelScheduledValues(at);
     pan.pan.setValueAtTime(pan.pan.value, at);
-    pan.pan.linearRampToValueAtTime((rng() * 2 - 1) * 0.35, at + attack);
+    pan.pan.linearRampToValueAtTime((rng() * 2 - 1) * 0.75, at + attack);
   }, { periodMin: 7, periodMax: 12 });
 
   return {
@@ -330,7 +424,7 @@ function createWaves(ctx, shared) {
       swell.stop();
     },
     dispose() {
-      [body.output, lp, pan, output].forEach(disconnectSafe);
+      [body.output, lp, mono, pan, panGain, diffuse, output].forEach(disconnectSafe);
     }
   };
 }
@@ -346,9 +440,21 @@ function createWind(ctx, shared) {
   bp.type = 'bandpass';
   bp.frequency.value = 500;
   bp.Q.value = 1.4;
+  // 吹き抜けていく突風は定位させたいのでモノラルに畳んでからパンする。
+  // 拡がり成分を薄く残して、風が吹いている「場」の広さも保つ。
+  const mono = toMono(ctx);
   const pan = ctx.createStereoPanner();
   pan.pan.value = 0;
-  body.output.connect(bp).connect(pan).connect(output);
+  // 風は「吹き抜ける動き」と同じくらい「その場の広さ」も大事なので、
+  // 拡がり成分をやや厚めにして定位成分と混ぜる。2経路は同じ元信号なので
+  // 振幅で足し合わさる点に注意（合計が元の音量に揃うよう実測で決めた値）。
+  const panGain = ctx.createGain();
+  panGain.gain.value = 0.55;
+  const diffuse = ctx.createGain();
+  diffuse.gain.value = 0.53;
+  body.output.connect(bp);
+  bp.connect(mono).connect(pan).connect(panGain).connect(output);
+  bp.connect(diffuse).connect(output);
 
   // 中心周波数をゆっくりしたランダムウォークで動かす（吹き抜ける感じ）。
   // 定位も同じ周期でランダムウォークさせ、左右を吹き抜けていく感じを足す
@@ -360,7 +466,7 @@ function createWind(ctx, shared) {
     bp.frequency.linearRampToValueAtTime(target, at + dur);
     pan.pan.cancelScheduledValues(at);
     pan.pan.setValueAtTime(pan.pan.value, at);
-    pan.pan.linearRampToValueAtTime((rng() * 2 - 1) * 0.7, at + dur);
+    pan.pan.linearRampToValueAtTime((rng() * 2 - 1) * 0.9, at + dur);
   }, { periodMin: 2.5, periodMax: 5 });
 
   // 突風のエンベロープ
@@ -382,7 +488,7 @@ function createWind(ctx, shared) {
       gust.stop();
     },
     dispose() {
-      [body.output, bp, pan, output].forEach(disconnectSafe);
+      [body.output, bp, mono, pan, panGain, diffuse, output].forEach(disconnectSafe);
     }
   };
 }

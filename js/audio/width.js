@@ -8,6 +8,14 @@
 // ノード数・接続は生成時に固定。可変なのは side 側 2 本の GainNode の値だけなので、
 // スライダー操作のたびにグラフを組み替える必要はない。
 
+/**
+ * w の上限。1.0 が「入力そのままのステレオ幅」で、そこを上限にすると
+ * スライダーを振り切っても "元の音" にしかならず効果が分かりにくい。
+ * 1 を超える領域では side を持ち上げて元より広げる（環境音のような無相関ノイズが
+ * 主体の素材では位相の破綻もほぼ起きない）。
+ */
+export const MAX_WIDTH = 2;
+
 export function createWidthStage(ctx) {
   const input = ctx.createChannelSplitter(2);
   const output = ctx.createChannelMerger(2);
@@ -48,9 +56,9 @@ export function createWidthStage(ctx) {
   return {
     input,
     output,
-    /** w: 0(モノラル)〜1(元のステレオ幅)。at/smooth 省略時は即値変更。 */
+    /** w: 0(モノラル)〜1(元のステレオ幅)〜MAX_WIDTH(強調)。at/smooth 省略時は即値変更。 */
     setWidth(w, at, smooth) {
-      const clamped = Math.min(1, Math.max(0, w));
+      const clamped = Math.min(MAX_WIDTH, Math.max(0, w));
       if (at == null || !smooth) {
         sideW.gain.value = clamped;
         sideWInv.gain.value = -clamped;
