@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { fillWhite, fillPink, fillBrown, createNoiseBuffer } from '../js/audio/noise.js';
 import { poissonDelay, createScheduler } from '../js/audio/scheduler.js';
 import { SOUNDS, getSound } from '../js/audio/sounds.js';
-import { createWidthStage } from '../js/audio/width.js';
+import { createWidthStage, MAX_WIDTH } from '../js/audio/width.js';
 import { DEFAULTS } from '../js/settings.js';
 
 /** シード付きの決定論的 rng（テストの再現性のため）。 */
@@ -155,10 +155,18 @@ describe('createWidthStage', () => {
     assert.equal(sideWInv.gain.value, -0.7);
   });
 
-  test('範囲外の値は 0〜1 にクランプされる', () => {
+  test('w=1 を超えると side を持ち上げて元より広げる', () => {
+    const { ctx, created } = fakeCtx();
+    createWidthStage(ctx).setWidth(1.5);
+    const { sideW, sideWInv } = sideGains(created);
+    assert.equal(sideW.gain.value, 1.5);
+    assert.equal(sideWInv.gain.value, -1.5);
+  });
+
+  test('範囲外の値は 0〜MAX_WIDTH にクランプされる', () => {
     const over = fakeCtx();
-    createWidthStage(over.ctx).setWidth(2);
-    assert.equal(sideGains(over.created).sideW.gain.value, 1);
+    createWidthStage(over.ctx).setWidth(99);
+    assert.equal(sideGains(over.created).sideW.gain.value, MAX_WIDTH);
 
     const under = fakeCtx();
     createWidthStage(under.ctx).setWidth(-1);
@@ -172,6 +180,165 @@ describe('createWidthStage', () => {
     assert.equal(sideW.gain.value, 0.5);
     assert.equal(sideWInv.gain.value, -0.5);
   });
+});
+
+describe('音源の定位（StereoPanner にはモノラルを入れる）', () => {
+  /**
+   * 接続を記録する AudioContext モック。
+   *
+   * 「StereoPannerNode に無相関ステレオをそのまま入れていないか」を検査するためのもの。
+   * ノイズ源は左右が無相関なので、畳まずにパンすると左右で別々の波形が鳴るだけになり、
+   * 定位が滲んで「ステレオに聞こえない」という不具合になる（実測で相関 1.0→0.69、
+   * L/R 差 16dB→12.9dB まで劣化する）。これはグラフの形だけで検出できる。
+   */
+  function recordingCtx() {
+    const nodes = [];
+    const edges = []; // { from, to }
+
+    function param(value = 0) {
+      return {
+        value,
+        setValueAtTime() { return this; },
+        setTargetAtTime() { return this; },
+        linearRampToValueAtTime() { return this; },
+        exponentialRampToValueAtTime() { return this; },
+        cancelScheduledValues() { return this; }
+      };
+    }
+
+    // ノード種別は kind に持たせる。type は BiquadFilterNode.type / OscillatorNode.type
+    // として音源側が書き換えるプロパティなので、種別の判定には使えない。
+    function node(kind, extra = {}) {
+      const n = {
+        kind,
+        channelCount: 2,
+        channelCountMode: 'max',
+        channelInterpretation: 'speakers',
+        connect(dest) {
+          // AudioParam への接続（変調）はノード間の信号経路ではないので記録しない
+          if (dest && dest.kind) edges.push({ from: n, to: dest });
+          return dest;
+        },
+        disconnect() { },
+        ...extra
+      };
+      nodes.push(n);
+      return n;
+    }
+
+    const ctx = {
+      sampleRate: 48000,
+      currentTime: 0,
+      createGain: () => node('gain', { gain: param(1) }),
+      createBiquadFilter: () => node('biquad', { type: 'lowpass', frequency: param(1000), Q: param(1) }),
+      createStereoPanner: () => node('stereo-panner', { pan: param(0) }),
+      createOscillator: () => node('oscillator', {
+        type: 'sine', frequency: param(440), start() { }, stop() { }
+      }),
+      createBufferSource: () => node('buffer-source', {
+        buffer: null, loop: false, playbackRate: param(1), start() { }, stop() { }, onended: null
+      }),
+      createChannelSplitter: () => node('splitter'),
+      createChannelMerger: () => node('merger'),
+      createBuffer(channels, length, sampleRate) {
+        const data = Array.from({ length: channels }, () => new Float32Array(length));
+        return {
+          length,
+          numberOfChannels: channels,
+          sampleRate,
+          duration: length / sampleRate,
+          getChannelData: (i) => data[i]
+        };
+      }
+    };
+    return { ctx, nodes, edges };
+  }
+
+  /** ワンショット（パチパチ・泡）も必ず生成されるよう、登録即発火するスケジューラ。 */
+  function eagerScheduler() {
+    return {
+      addJob(id, { onEvent }) { onEvent(0); },
+      removeJob() { },
+      updateRate() { },
+      tickOnce() { },
+      start() { },
+      stop() { }
+    };
+  }
+
+  function buildAll(sound) {
+    const { ctx, nodes, edges } = recordingCtx();
+    const buffers = {
+      white: createNoiseBuffer(ctx, 'white', 1, seededRng(1)),
+      pink: createNoiseBuffer(ctx, 'pink', 1, seededRng(2)),
+      brown: createNoiseBuffer(ctx, 'brown', 1, seededRng(3))
+    };
+    const voice = sound.create(ctx, { buffers, scheduler: eagerScheduler() });
+    voice.start(0); // パチパチ・泡はここで初めて生成される
+    // 波・風は start() で setTimeout のループを回し始めるので、必ず止めてから返す
+    // （止めないとテストプロセスが終了しない）。stop() は接続を壊さないので記録は残る。
+    voice.stop(0);
+    return { ctx, nodes, edges, voice };
+  }
+
+  /**
+   * そのノードから出てくる信号が 1ch かどうかを、上流をたどって判定する。
+   * GainNode 等は channelCountMode='max' なので、自身の ch 数ではなく
+   * 「何が入っているか」で決まる（泡の OscillatorNode → GainNode → Panner のように、
+   * 見かけは 2ch/max でも中身はモノラル、というケースがある）。
+   */
+  function makeIsMono(edges) {
+    const cache = new Map();
+    return function isMono(n, seen = new Set()) {
+      if (cache.has(n)) return cache.get(n);
+      if (seen.has(n)) return true; // 循環（ここでは起きない）は判定に影響させない
+      seen.add(n);
+
+      let result;
+      if (n.channelCount === 1 && n.channelCountMode === 'explicit') {
+        result = true; // toMono() で明示的に畳んである
+      } else if (n.kind === 'oscillator') {
+        result = true; // 単一の発振器は常にモノラル
+      } else if (n.kind === 'buffer-source') {
+        result = (n.buffer?.numberOfChannels ?? 1) === 1;
+      } else {
+        const inputs = edges.filter((e) => e.to === n).map((e) => e.from);
+        result = inputs.length > 0 && inputs.every((src) => isMono(src, seen));
+      }
+
+      cache.set(n, result);
+      return result;
+    };
+  }
+
+  for (const sound of SOUNDS) {
+    test(`${sound.id}: StereoPanner の入力はすべてモノラルに畳まれている`, () => {
+      const { nodes, edges } = buildAll(sound);
+      const isMono = makeIsMono(edges);
+      const panners = nodes.filter((n) => n.kind === 'stereo-panner');
+      assert.ok(panners.length > 0 || sound.id === 'rain', `${sound.id}: 定位させる要素が無い`);
+
+      for (const panner of panners) {
+        const inputs = edges.filter((e) => e.to === panner).map((e) => e.from);
+        assert.ok(inputs.length > 0, `${sound.id}: StereoPanner に入力が無い`);
+        for (const src of inputs) {
+          assert.ok(
+            isMono(src),
+            `${sound.id}: StereoPanner に ${src.kind}（${src.channelCount}ch/${src.channelCountMode}）が` +
+            '直接入っている。無相関ステレオのままパンすると定位が滲むので、' +
+            'toMono() で畳んでから入れること'
+          );
+        }
+      }
+    });
+
+    test(`${sound.id}: 左右どちらかに寄った定位を持つ（または左右を揺らす）`, () => {
+      const { nodes } = buildAll(sound);
+      const panned = nodes.some((n) => n.kind === 'stereo-panner');
+      const swayed = nodes.some((n) => n.kind === 'splitter') && nodes.some((n) => n.kind === 'merger');
+      assert.ok(panned || swayed, `${sound.id}: 定位も左右の揺れも無く、モノラルにしか聞こえない`);
+    });
+  }
 });
 
 describe('poissonDelay', () => {

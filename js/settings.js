@@ -1,6 +1,7 @@
 // 設定の永続化。API キーは localStorage のみに置き、外部へは送らない。
 
 import { SOUNDS } from './audio/sounds.js';
+import { MAX_WIDTH } from './audio/width.js';
 
 const KEY = 'fuukei.settings.v1';
 const SOUND_IDS = SOUNDS.map((s) => s.id);
@@ -22,7 +23,7 @@ export const DEFAULTS = {
   audio: {
     master: 0.6,
     muted: false,
-    width: 0.8,           // ステレオ幅。0=モノラル、1=元のステレオ幅
+    width: 1,             // ステレオ幅。0=モノラル、1=元のステレオ幅、以降は強調（上限 MAX_WIDTH）
     enabled: [],          // 鳴らす環境音の id（例: ['rain', 'fire']）。複数可
     volumes: Object.fromEntries(SOUND_IDS.map((id) => [id, 0.5]))
   },
@@ -44,11 +45,16 @@ export const AI_DEFAULT_MODELS = {
 const INTERVAL_MIN = 60;
 const INTERVAL_MAX = 3600;
 
-/** 0〜1 にクランプする。数値化できなければ fallback を返す。 */
-export function clamp01(v, fallback = 0) {
+/** 0〜max にクランプする。数値化できなければ fallback を返す。 */
+export function clampRange(v, max, fallback = 0) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
-  return Math.min(1, Math.max(0, n));
+  return Math.min(max, Math.max(0, n));
+}
+
+/** 0〜1 にクランプする。数値化できなければ fallback を返す。 */
+export function clamp01(v, fallback = 0) {
+  return clampRange(v, 1, fallback);
 }
 
 /**
@@ -71,7 +77,7 @@ function mergeAudio(saved) {
   return {
     master: clamp01(src.master, DEFAULTS.audio.master),
     muted: Boolean(src.muted),
-    width: clamp01(src.width, DEFAULTS.audio.width),
+    width: clampRange(src.width, MAX_WIDTH, DEFAULTS.audio.width),
     enabled,
     volumes
   };
