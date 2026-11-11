@@ -4,6 +4,8 @@
 カテゴリとラベルを選ぶと、その条件に合うクリエイティブ・コモンズ / パブリックドメインの
 高解像度写真を取得して、スクリーンセーバーのように表示し続けます。
 
+**デモ / 公開先**: https://ka-zuu.github.io/fuukei/
+
 ## できること
 
 - **カテゴリ × ラベル × 雰囲気** の 3 段で条件を指定（例: 山岳 × 雪山 × 夕暮れ）
@@ -132,6 +134,7 @@ GitHub Pages を使います（ビルド不要の静的サイトなので最短�
 1. リポジトリの **Settings → Pages → Source** を **GitHub Actions** に設定
 2. `main` に push すると `.github/workflows/deploy.yml` が動き、
    `https://<ユーザー名>.github.io/<リポジトリ名>/` に公開されます
+   （このリポジトリの公開先: https://ka-zuu.github.io/fuukei/ ）
 
 すべてのパスが相対 (`./`) なので、サブディレクトリ配信でもそのまま動きます。
 Cloudflare Pages / Netlify / Vercel にディレクトリごと置いても同様に動作します。
